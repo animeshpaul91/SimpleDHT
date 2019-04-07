@@ -54,8 +54,6 @@ public class SimpleDhtProvider extends ContentProvider {
     private static final String my_dht = "@";
     private static final String all_dht = "*";
 
-    private static final String P = "P";//Literal for Predecessor for Server Information
-    private static final String S = "S";//Literal for Successor for Server Information
     private static final String NJ = "NJ"; //Literal for Node Join event
     private static final String UN = "UN"; //Literal to update neighbor
     private static final String F = "F"; //Literal to forward a key value
@@ -81,7 +79,7 @@ public class SimpleDhtProvider extends ContentProvider {
             this.hash = hash;
         }
 
-        public String getNode()
+        public String getPort()
         {
             return this.port;
         }
@@ -104,7 +102,7 @@ public class SimpleDhtProvider extends ContentProvider {
         @Override
         public String toString()
         {
-            return ("NodeID: "+this.port);
+            return ("NodeID: "+this.port+" Pred: "+this.getPred()+" Succ: "+this.getSucc());
         }
     }
 
@@ -210,19 +208,18 @@ public class SimpleDhtProvider extends ContentProvider {
         else //for next phases
         {
             try {
-                Log.d(TAG,"Main_prevnode: "+prevNode);
-                Log.d(TAG,"Main_nextnode: "+nextNode);
-                Log.d(TAG,"Main_Ring: "+nodeList.toString());
                 String nexthash = genHash(nextNode);
                 String prevhash = genHash(prevNode);
                 if (myPorthash.compareTo(prevhash) > 0)
                 {
+                    Log.d(TAG, prevhash+";"+myPorthash+";"+keyhash);
                     if (keyhash.compareTo(prevhash) > 0 && keyhash.compareTo(myPorthash) <= 0) //this key is in my scope
                     {
                         try {
                             fileOutputStream = getContext().openFileOutput(key, Context.MODE_PRIVATE);
                             fileOutputStream.write(value.getBytes());
                             fileList.add(key);
+                            Log.d(TAG, "FileList: "+fileList);
                         }
                         catch (NullPointerException e)
                         {
@@ -235,7 +232,6 @@ public class SimpleDhtProvider extends ContentProvider {
                             Log.e(TAG, "Main_Insert: " +ePort+ " IO Exception Occurred");
                             e.printStackTrace();
                         }
-
                     }
 
                     else //forward to next Node
@@ -247,12 +243,13 @@ public class SimpleDhtProvider extends ContentProvider {
 
                 else
                 {
-                    if (keyhash.compareTo(prevhash) > 0 && keyhash.compareTo(myPorthash) >= 0) //Condition between last node and first node
-                    {   //Even then this key is in my scope
+                    if (keyhash.compareTo(prevhash) > 0 || keyhash.compareTo(myPorthash) <= 0) //Condition between last node and first node. Even then this key is in my scope
+                    {
                         try{
                             fileOutputStream = getContext().openFileOutput(key, Context.MODE_PRIVATE);
                             fileOutputStream.write(value.getBytes());
                             fileList.add(key);
+                            Log.d(TAG, "FileList: "+fileList);
                         }
 
                         catch (NullPointerException e)
@@ -416,7 +413,46 @@ public class SimpleDhtProvider extends ContentProvider {
 
         else // Next Phases
         {
+           if (currentQuery.equals(my_dht)) //Selection of @ in self node
+           {
+               try
+               {
+                   for (String key: fileList)
+                   {
+                       fileInputStream = getContext().openFileInput(key);
+                       if (fileInputStream!=null)
+                       {
+                           BufferedReader br = new BufferedReader(new InputStreamReader(fileInputStream));
+                           message = br.readLine();
+                           String row[] = {key, message};
+                           mc.addRow(row);
+                           br.close();
+                           fileInputStream.close();
+                       }
+                   }
+                   Log.d(TAG, "Main_Query: "+ePort+" All keys in my Node are queried Successfully");
+               }
 
+               catch (FileNotFoundException e)
+               {
+                   Log.e(TAG, "Main_Query: "+ePort+" Unable to Open file");
+               }
+
+               catch (IOException e)
+               {
+                   Log.e(TAG, "Main_Query: "+ePort+" IO Exception Occurred");
+               }
+
+               return mc;
+           }
+
+           else
+           {
+               if (currentQuery.equals(all_dht))
+               {
+                   //Write Logic of * here
+               }
+           }
         }
 
         return null;
@@ -458,6 +494,10 @@ public class SimpleDhtProvider extends ContentProvider {
                     DataOutputStream out = new DataOutputStream(server.getOutputStream());
                     msgfromclient = in.readUTF();
                     pieces = msgfromclient.split(";");
+                    out.writeUTF("ACK;"+ePort);
+                    out.flush();
+                    out.close();
+                    in.close();
 
                     if (pieces[0].equals(NJ)) //A new Node asks for joining
                     {
@@ -466,14 +506,12 @@ public class SimpleDhtProvider extends ContentProvider {
                         {
                             try
                             {
-                                String prevNode=null, nextNode=null; //Stores the emulator port of the previous and next nodes for the client
                                 isAlone = false;
                                 boolean isInserted = false;
                                 String hash = genHash(pieces[1]); //pieces[1] will be local emulator port of the sender eg. 5554
                                 Node this_node = new Node(pieces[1], hash); //instatiate a new Node Object
                                 //Node Insertion Logic
                                 int n = nodeList.size();
-
                                 for (int i=0; i<n; i++)
                                 {
                                     Node node = nodeList.get(i);
@@ -519,24 +557,11 @@ public class SimpleDhtProvider extends ContentProvider {
                                     nodeList.get(0).pred = this_node.port;
                                     nodeList.add(this_node); //Just append the node
                                 }
-
-                                msgtoclient = this_node.pred + ";" + this_node.succ;
-                                out.writeUTF(msgtoclient);
-                                out.flush();
-                                ack = in.readUTF().split(";");
-                                if (!ack[0].equals("ACK"))
-                                    Log.e(TAG, "Server: "+ePort+" Ack not Received");
-                                else
-                                    Log.d(TAG, "Server: "+ePort+" Ack Received from Client: "+ack[1]);
-                                publishProgress(this_node.pred, this_node.succ, pieces[1]); //Send Client's Predecessor and Successor and Client Port to new Task
-
-                                //publishProgress(prevNode, nextNode, pieces[1]); //Send Client's Predecessor and Successor and Client Port to new Task
-                                out.close();
-                                in.close();
+                                sendmsgCT(UN+";"); //Update Other Nodes about their neighbours
                             }
                             catch (NoSuchAlgorithmException e)
                             {
-                                Log.e(TAG, "Main: "+ePort+" No Such Algorithm Exception Occurred");
+                                Log.e(TAG, "Server: "+ePort+" No Such Algorithm Exception Occurred");
                                 e.printStackTrace();
                             }
                         }
@@ -546,26 +571,24 @@ public class SimpleDhtProvider extends ContentProvider {
                     {
                         if (pieces[0].equals(UN))
                         {
-                            Log.d(TAG, "Server: "+ePort+" UN Message Received From: "+pieces[1]);
-                            if (pieces[1].equals(S)) //Update Predecessor
-                            {
-                                prevNode = pieces[2];
-                                out.writeUTF("ACK"+";"+ePort);
-                                out.flush();
-                                out.close();
-                                in.close();
-                            }
+                            prevNode = pieces[1]; //Set Updated Neighbors
+                            nextNode = pieces[2];
+                        }
 
-                            else
+                        else
+                        {
+                            if (pieces[0].equals(F))
                             {
-                                nextNode = pieces[2];
-                                out.writeUTF("ACK"+";"+ePort);
-                                out.flush();
-                                out.close();
-                                in.close();
+                                Log.d(TAG, "Server: "+ePort+" Received Forwarded Message: "+msgfromclient+" from: "+prevNode);
+                                ContentValues contentValues = new ContentValues();
+                                contentValues.put(key_field, pieces[1]);
+                                contentValues.put(value_field, pieces[2]);
+                                getContext().getContentResolver().insert(provideruri, contentValues);
                             }
                         }
+
                     }
+
                 }
                 catch (IOException e)
                 {
@@ -574,74 +597,7 @@ public class SimpleDhtProvider extends ContentProvider {
                 }
             }
         }
-
-        protected void onProgressUpdate(String... Ports)
-        {
-            new serverUpdateTask().executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, Ports);
-        }
     }
-
-
-    //ServerUpdate Task starts here
-
-    private class serverUpdateTask extends AsyncTask<String, Void, Void> //To Update Server about prevnode and nextnode
-    {
-        @Override
-        protected Void doInBackground(String... msgs)
-        {
-            Log.d(TAG, "Inside Server Informaer Task");
-            String pred = msgs[0], succ = msgs[1], myport = msgs[2], ack[];
-            Log.d(TAG, "Predecessor= "+pred);
-            Log.d(TAG, "Successor= "+succ);
-
-            try
-            {
-                Integer port = Integer.parseInt(pred)*2;
-                Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 0, 2}), port); //send
-                // to my Predecessor
-                DataInputStream i = new DataInputStream(socket.getInputStream());
-                DataOutputStream o = new DataOutputStream(socket.getOutputStream());
-                o.writeUTF(UN+";"+P+";"+myport);
-                o.flush();
-                ack = i.readUTF().split(";");
-                if (!ack[0].equals("ACK"))
-                    Log.e(TAG,"ServerUpdateTask: "+ePort+" Did not Receive Ack");
-                else
-                    Log.d(TAG, "ServerUpdateTask: "+ePort+" Ack Received from Server: "+ack[1]);
-                o.close();
-                i.close();
-                socket.close();
-
-                Socket socket1 = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 0, 2}), Integer.parseInt(succ)*2); //send to my Successor
-                DataInputStream i1 = new DataInputStream(socket1.getInputStream());
-                DataOutputStream o1 = new DataOutputStream(socket1.getOutputStream());
-                o1.writeUTF(UN+";"+S+";"+myport);
-                o1.flush();
-                ack = i1.readUTF().split(";");
-                if (!ack[0].equals("ACK"))
-                    Log.e(TAG,"ServerUpdateTask: "+ePort+" Did not Receive Ack");
-                else
-                    Log.d(TAG, "ServerUpdateTask: "+ePort+" Ack Received from Server: "+ack[1]);
-                o1.close();
-                i1.close();
-                socket1.close();
-            }
-
-            catch (UnknownHostException e)
-            {
-                Log.e(TAG, "ServerUpdateTask: "+ePort+" Unknown Host Exception Occurred");
-                e.printStackTrace();
-            }
-
-            catch (IOException e)
-            {
-                Log.e(TAG, "ServerUpdateTask: "+ePort+" IO Exception Occurred");
-                e.printStackTrace();
-            }
-            return null;
-        }
-    }
-
 
     //Client Task starts here
     private class ClientTask extends AsyncTask<String, Void, String> //Capable of returning a string type
@@ -649,8 +605,8 @@ public class SimpleDhtProvider extends ContentProvider {
         @Override
         protected String doInBackground(String... msgs)
         {
-            Log.d(TAG, "Client: "+ePort+" In Client Task");
             String[] pieces = msgs[0].split(";");
+            String [] ack;
             if (pieces[0].equals(NJ))
             {
                 if (!ePort.equals(first_node))
@@ -663,14 +619,9 @@ public class SimpleDhtProvider extends ContentProvider {
                         String msgToServer = NJ + ";" + ePort;
                         out.writeUTF(msgToServer);
                         out.flush();
-                        //All nodes get placed now
-                        String msg[] = in.readUTF().split(";");
-                        out.writeUTF("ACK"+";"+ePort);
-                        out.flush();
-                        Log.d(TAG, "Client: "+ePort+" Ack sent to Server");
-                        prevNode = msg[0]; //prevnode obtained for this Node
-                        nextNode = msg[1]; //nextnode obtained for this Node
-                        Log.d(TAG, "Client: "+ePort+" My PrevNode: "+prevNode+ " and NextNode: "+nextNode+" Obtained");
+                        ack = in.readUTF().split(";");
+                        if (!ack[0].equals("ACK"))
+                            Log.e(TAG,"Client: "+ePort+" Did not receive Ack");
                         out.close();
                         in.close();
                         client.close();
@@ -717,9 +668,55 @@ public class SimpleDhtProvider extends ContentProvider {
 
             else {
 
-                if (pieces[0].equals(F)) //Forwarded Message
+                if (pieces[0].equals(UN)) //Update Neighbour Message
                 {
+                    for (Node node: nodeList) {
+                        String msgtoServer = UN + ";" + node.getPred() + ";" + node.getSucc();
+                        try {
+                            Socket client = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(node.getPort()) * 2);
+                            DataInputStream in = new DataInputStream(client.getInputStream());
+                            DataOutputStream out = new DataOutputStream(client.getOutputStream());
+                            out.writeUTF(msgtoServer);
+                            out.flush();
+                            ack = in.readUTF().split(";");
+                            if (!ack[0].equals("ACK"))
+                                Log.e(TAG, "Client: " + ePort + " Did not receive Ack");
+                            out.close();
+                            in.close();
+                            client.close();
+                        } catch (UnknownHostException e) {
+                            Log.e(TAG, "Client: " + ePort + " UnknownHost Exception Occurred");
+                        } catch (IOException e) {
+                            Log.e(TAG, "Client: " + ePort + " IO Exception Occurred");
+                        }
+                    }
+                }
 
+                else
+                {
+                    if (pieces[0].equals(F)) //Forward a Message to the next avd
+                    {
+                        try
+                        {
+                            Log.d(TAG, "Client: "+ePort+" Forwarding Message: "+msgs[0]+" to: "+nextNode);
+                            Socket client = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(nextNode) * 2);
+                            DataInputStream in = new DataInputStream(client.getInputStream());
+                            DataOutputStream out = new DataOutputStream(client.getOutputStream());
+                            out.writeUTF(msgs[0]);
+                            out.flush();
+                            ack = in.readUTF().split(";");
+                            if (!ack[0].equals("ACK"))
+                                Log.e(TAG, "Client: " + ePort + " Did not receive Ack");
+                            out.close();
+                            in.close();
+                            client.close();
+                        }
+                        catch (UnknownHostException e) {
+                            Log.e(TAG, "Client: " + ePort + " UnknownHost Exception Occurred");
+                        } catch (IOException e) {
+                            Log.e(TAG, "Client: " + ePort + " IO Exception Occurred");
+                        }
+                    }
                 }
             }
 
