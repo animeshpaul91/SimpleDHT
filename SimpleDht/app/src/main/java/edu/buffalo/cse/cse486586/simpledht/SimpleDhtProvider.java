@@ -9,34 +9,25 @@ import android.net.Uri;
 import android.os.AsyncTask;
 import android.telephony.TelephonyManager;
 import android.util.Log;
-
-import org.w3c.dom.NodeList;
-
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.net.SocketException;
-import java.net.SocketTimeoutException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Formatter;
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.net.InetAddress;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
-import java.io.PrintWriter;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.util.*;
+import java.util.concurrent.ExecutionException;
 
 
 public class SimpleDhtProvider extends ContentProvider {
@@ -64,9 +55,9 @@ public class SimpleDhtProvider extends ContentProvider {
     private static Uri provideruri = Uri.parse("content://edu.buffalo.cse.cse486586.simpledht.provider"); //URI
     private static String prevNode; //Keeps track of predecessor for this node
     private static String nextNode; //Keeps track of successor for this node
-    private static String sourceNode; //Keeps track of source Node
-    List<String> fileList; //stores/maps keys for this Node
-    List<Node> nodeList; //This is the ring
+    private static String sourceNode = "0"; //Keeps track of source Node in Recursive Queries
+    List<String> myKeys; //stores/maps keys for this Node
+    List<Node> nodeList; //This is the ring maintained at Node 5554
 
     private class Node
     {
@@ -111,6 +102,25 @@ public class SimpleDhtProvider extends ContentProvider {
         new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg);
     }
 
+    public String sendMsgCT(String msg)
+    {
+        String result=null;
+
+        try {
+            result = new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg).get();
+        }
+
+        catch (InterruptedException e)
+        {
+            Log.e(TAG, "Main: "+ePort+" Interrupted Exception Occurred");
+        }
+        catch (ExecutionException e)
+        {
+            Log.e(TAG, "Main: "+ePort+" Execution Exception Occurred");
+        }
+        return result;
+    }
+
     @Override
     public int delete(Uri uri, String selection, String[] selectionArgs) {
         // TODO Auto-generated method stub
@@ -119,11 +129,11 @@ public class SimpleDhtProvider extends ContentProvider {
         {
             if (currentQuery.equals(my_dht) || currentQuery.equals(all_dht)) //* or @ is same for a single node
             {
-                for (String key: fileList)
+                for (String key: myKeys)
                 {
                     getContext().deleteFile(key); //Deletes the file from avd
                 }
-                fileList.clear();
+                myKeys.clear();
                 Log.d(TAG, "Main_Delete: "+ePort+" All Files from Avd are Deleted");
                 return 1;
             }
@@ -131,7 +141,7 @@ public class SimpleDhtProvider extends ContentProvider {
             else //for a particular key(!= @ or !=*)
             {
                 boolean fileFound = false;
-                for (String key: fileList)
+                for (String key: myKeys)
                 {
                     if (key.equals(currentQuery))
                     {
@@ -143,7 +153,7 @@ public class SimpleDhtProvider extends ContentProvider {
 
                 if (fileFound)
                 {
-                    fileList.remove(currentQuery);
+                    myKeys.remove(currentQuery);
                     Log.d(TAG, "Main_Delete: "+ePort+" File with Key= "+currentQuery+" is deleted");
                     return 1;
                 }
@@ -151,11 +161,100 @@ public class SimpleDhtProvider extends ContentProvider {
             }
         }
 
-        else //for next phases
+        else if (currentQuery.equals(my_dht))
         {
-
+            for (String key: myKeys)
+            {
+                getContext().deleteFile(key);
+            }
+            myKeys.clear();
+            return 1;
         }
 
+        else if (currentQuery.equals(all_dht))
+        {
+            for (String key: myKeys)
+            {
+                getContext().deleteFile(key);
+            }
+            myKeys.clear();
+
+            if (!serverreq || !nextNode.equals(sourceNode))
+            {
+                String msgtosend;
+                if (serverreq)
+                {
+                    msgtosend = DA+";"+sourceNode;
+                    sendmsgCT(msgtosend);
+                }
+                else
+                {
+                    msgtosend = DA+";"+ePort;
+                    sendmsgCT(msgtosend);
+                }
+            }
+            serverreq=false;
+            return 1;
+        }
+
+        else //for a particular key
+        {
+            try {
+                String currentQueryhash = genHash(currentQuery);
+                String prevnodehash = genHash(prevNode);
+                if (myPorthash.compareTo(prevnodehash) > 0) {
+                    if (currentQueryhash.compareTo(prevnodehash) > 0 && currentQueryhash.compareTo(myPorthash) <= 0) //this key is in my scope
+                    {
+                        boolean filefound = false;
+                        for (String key : myKeys) {
+                            if (key.equals(currentQuery)) {
+                                getContext().deleteFile(key);
+                                filefound = true;
+                                break;
+                            }
+                        }
+
+                        if (filefound) {
+                            myKeys.remove(currentQuery);
+                            Log.d(TAG, "Main_Delete: " + ePort + " File with Key= " + currentQuery + " is deleted");
+                            return 1;
+                        }
+
+                        return 0;
+                    } else //send to next node
+                    {
+                        String msgtosend = D + ";" + currentQuery;
+                        sendmsgCT(msgtosend);
+                    }
+                } else //Special Condition between Node 1 and N
+                {
+                    if (currentQueryhash.compareTo(prevnodehash) > 0 || currentQueryhash.compareTo(myPorthash) <= 0) {
+                        boolean filefound = false;
+                        for (String key : myKeys) {
+                            if (key.equals(currentQuery)) {
+                                getContext().deleteFile(key);
+                                filefound = true;
+                                break;
+                            }
+                        }
+
+                        if (filefound) {
+                            myKeys.remove(currentQuery);
+                            Log.d(TAG, "Main_Delete: " + ePort + " File with Key= " + currentQuery + " is deleted");
+                            return 1;
+                        }
+
+                        return 0;
+                    } else {
+                        String msgtosend = D + ";" + currentQuery;
+                        sendmsgCT(msgtosend);
+                    }
+                }
+            } catch (NoSuchAlgorithmException e) {
+                Log.e(TAG, "Main_Delete: " + ePort + " No Such Algorithm Exception Occurred");
+                e.printStackTrace();
+            }
+        }
         return 0;
     }
 
@@ -188,8 +287,8 @@ public class SimpleDhtProvider extends ContentProvider {
                 fileOutputStream = getContext().openFileOutput(key, Context.MODE_PRIVATE);
                 fileOutputStream.write(value.getBytes());
                 Log.d(TAG, "Main_Insert: "+ePort+" Insertion Successful "+values.toString());
-                fileList.add(key); //Mapping this key to this Node
-                Log.d(TAG, "Main_Insert: "+ePort+" FileList with me is: "+fileList.toString());
+                myKeys.add(key); //Mapping this key to this Node
+                Log.d(TAG, "Main_Insert: "+ePort+" FileList with me is: "+myKeys.toString());
             }
             catch (IOException e)
             {
@@ -208,7 +307,6 @@ public class SimpleDhtProvider extends ContentProvider {
         else //for next phases
         {
             try {
-                String nexthash = genHash(nextNode);
                 String prevhash = genHash(prevNode);
                 if (myPorthash.compareTo(prevhash) > 0)
                 {
@@ -218,8 +316,8 @@ public class SimpleDhtProvider extends ContentProvider {
                         try {
                             fileOutputStream = getContext().openFileOutput(key, Context.MODE_PRIVATE);
                             fileOutputStream.write(value.getBytes());
-                            fileList.add(key);
-                            Log.d(TAG, "FileList: "+fileList);
+                            myKeys.add(key);
+                            //Log.d(TAG, "FileList: "+myKeys);
                         }
                         catch (NullPointerException e)
                         {
@@ -245,11 +343,12 @@ public class SimpleDhtProvider extends ContentProvider {
                 {
                     if (keyhash.compareTo(prevhash) > 0 || keyhash.compareTo(myPorthash) <= 0) //Condition between last node and first node. Even then this key is in my scope
                     {
-                        try{
+                        try
+                        {
                             fileOutputStream = getContext().openFileOutput(key, Context.MODE_PRIVATE);
                             fileOutputStream.write(value.getBytes());
-                            fileList.add(key);
-                            Log.d(TAG, "FileList: "+fileList);
+                            myKeys.add(key);
+                            Log.d(TAG, "FileList: "+myKeys);
                         }
 
                         catch (NullPointerException e)
@@ -291,7 +390,7 @@ public class SimpleDhtProvider extends ContentProvider {
         //myPort = String.valueOf((Integer.parseInt(portStr) * 2)); //Redirection Port ( eg.11108)
         Log.d(TAG, "My Port is: "+ePort);
 
-        fileList = new ArrayList<String>();
+        myKeys = new ArrayList<String>();
         isAlone = false;
         serverreq = false; //Flags are false for other Nodes
 
@@ -347,7 +446,7 @@ public class SimpleDhtProvider extends ContentProvider {
             if (currentQuery.equals(my_dht) || currentQuery.equals(all_dht)) //@ and * mean the same thing in this context
             {
                 try {
-                    for (String key : fileList) //for all keys in my avd
+                    for (String key : myKeys) //for all keys in my avd
                     {
                         fileInputStream = getContext().openFileInput(key);
                         if (fileInputStream !=null)
@@ -411,13 +510,12 @@ public class SimpleDhtProvider extends ContentProvider {
             }
         }
 
-        else // Next Phases
-        {
-           if (currentQuery.equals(my_dht)) //Selection of @ in self node
+           else if (currentQuery.equals(my_dht)) //Selection of @ in self node
            {
+               Log.d(TAG, "Main_Query: "+ePort+" Query is: "+currentQuery);
                try
                {
-                   for (String key: fileList)
+                   for (String key: myKeys)
                    {
                        fileInputStream = getContext().openFileInput(key);
                        if (fileInputStream!=null)
@@ -430,7 +528,6 @@ public class SimpleDhtProvider extends ContentProvider {
                            fileInputStream.close();
                        }
                    }
-                   Log.d(TAG, "Main_Query: "+ePort+" All keys in my Node are queried Successfully");
                }
 
                catch (FileNotFoundException e)
@@ -446,16 +543,188 @@ public class SimpleDhtProvider extends ContentProvider {
                return mc;
            }
 
-           else
+           else if (currentQuery.equals(all_dht)) //return all key value pairs stored in entire DHT from any Node
            {
-               if (currentQuery.equals(all_dht))
+               Log.d(TAG, "Main_Query: "+ePort+" Query is: "+all_dht);
+               try
                {
-                   //Write Logic of * here
+                   for (String key: myKeys) //In my Node
+                   {
+                       fileInputStream = getContext().openFileInput(key);
+                       if (fileInputStream!=null)
+                       {
+                           BufferedReader br = new BufferedReader(new InputStreamReader(fileInputStream));
+                           message = br.readLine();
+                           String row[] = {key, message};
+                           mc.addRow(row);
+                           br.close();
+                           fileInputStream.close();
+                       }
+                   }
                }
-           }
-        }
+               catch (FileNotFoundException e)
+               {
+                   Log.e(TAG, "Main_Query: "+ePort+" Unable to Open file");
+               }
+               catch (IOException e)
+               {
+                   Log.e(TAG, "Main_Query: "+ePort+" IO Exception Occurred");
+               }
 
-        return null;
+               Log.d(TAG, "Main_Query: "+ePort+" Self Keys added in Matrix Cursor");
+               if (!serverreq || !nextNode.equals(sourceNode))
+               {
+                   String msgtoSend, result;
+                   if(serverreq)//Will be false for Originating Server
+                   {
+                       msgtoSend = GA+";"+sourceNode;
+                       result = sendMsgCT(msgtoSend);
+                   }
+                   else
+                   {
+                       msgtoSend = GA+";"+ePort;
+                       result = sendMsgCT(msgtoSend);
+                   }
+
+                   if (!result.isEmpty())
+                   {
+                       String keyvalues[] = result.split(";");
+                       for (String keyvalue: keyvalues)
+                       {
+                           String[] kv = keyvalue.split(":");
+                           String[] row = {kv[0], kv[1]};
+                           mc.addRow(row);
+                       }
+                   }
+               }
+               serverreq = false;
+               return mc;
+           }
+
+           else //Any Particular Query
+           {
+               Log.d(TAG, "Main_Query: "+ePort+" Query is: "+currentQuery);
+                try
+                {
+                    String currentQueryHash = genHash(currentQuery);
+                    String prevNodeHash = genHash(prevNode);
+                    if (myPorthash.compareTo(prevNodeHash) > 0)
+                    {
+                        Log.d(TAG, prevNodeHash+";"+currentQueryHash+";"+myPorthash);
+                        if (currentQueryHash.compareTo(prevNodeHash) > 0 && currentQueryHash.compareTo(myPorthash) <= 0)
+                        {
+                            Log.d(TAG, "Main_Query: "+ePort+" This query Item lies in my scope");
+                            try
+                            {
+                                fileInputStream = getContext().openFileInput(currentQuery);
+                                Log.d(TAG, "Main_Query: "+ePort+" Key: "+currentQuery+" located here");
+                                if (fileInputStream!=null)
+                                {
+                                    BufferedReader br = new BufferedReader(new InputStreamReader(fileInputStream));
+                                    message = br.readLine();
+                                    String[] row = {currentQuery, message};
+                                    mc.addRow(row);
+                                    br.close();
+                                    fileInputStream.close();
+                                }
+                            }
+                            catch (FileNotFoundException e)
+                            {
+                                Log.e(TAG, "Main_Query: "+ePort+" FilenotFound Exception Occurred");
+                            }
+                            catch (IOException e)
+                            {
+                                Log.e(TAG, "Main_Query: "+ePort+" IOException Occurred");
+                            }
+                            return mc;
+                        }
+
+                        else //Recursive Part
+                        {
+                            Log.d(TAG, "Main_Query: "+ePort+" Passing: "+currentQuery+" to Next Node: "+nextNode);
+                            try
+                            {
+                                String msgtosend = G+";"+currentQuery;
+                                String result = sendMsgCT(msgtosend); // A New Thread gets created
+                                if (!result.isEmpty())
+                                {
+                                    String [] keyvalue = result.split(":");
+                                    String [] rows = {keyvalue[0], keyvalue[1]};
+                                    mc.addRow(rows);
+                                }
+                            }
+                            catch (Exception e)
+                            {
+                                Log.e(TAG, "Main_Query: "+ePort+" Exception Occurred");
+                                e.printStackTrace();
+                            }
+                            return mc;
+                        }
+                    }
+
+                    else //Exceptional Condition
+                    {
+                        if (currentQueryHash.compareTo(prevNodeHash) > 0 || currentQueryHash.compareTo(myPorthash) <= 0)
+                        {
+                            try
+                            {
+                                Log.d(TAG, "Main_Query: "+ePort+" Between First and Last Node");
+                                fileInputStream = getContext().openFileInput(currentQuery);
+                                Log.d(TAG, "Main_Query: "+ePort+" Key: "+currentQuery+" located here");
+                                if (fileInputStream!=null)
+                                {
+                                    BufferedReader br = new BufferedReader(new InputStreamReader(fileInputStream));
+                                    message = br.readLine();
+                                    String [] row = {currentQuery, message};
+                                    mc.addRow(row);
+                                    br.close();
+                                    fileInputStream.close();
+                                }
+                            }
+                            catch (FileNotFoundException e)
+                            {
+                                Log.e(TAG, "Main_Query: "+ePort+" FileNotFound Exception Occurred");
+                            }
+
+                            catch (IOException e)
+                            {
+                                Log.e(TAG, "Main_Query: "+ePort+" IOException Occurred");
+                            }
+
+                            return mc;
+                        }
+
+                        else // Recursive Part
+                        {
+                            Log.d(TAG, "Main_Query: "+ePort+" Passing: "+currentQuery+" to Next Node: "+nextNode);
+                            String msgtoSend, result;
+                            try
+                            {
+                                msgtoSend = G+";"+currentQuery;
+                                result = sendMsgCT(msgtoSend);
+                                if(!result.isEmpty())
+                                {
+                                    String [] keyvalue = result.split(":");
+                                    String[] row = {keyvalue[0], keyvalue[1]};
+                                    mc.addRow(row);
+                                }
+                            }
+                            catch (Exception e)
+                            {
+                                Log.e(TAG, "Main_Query: "+ePort+" Exception Occurred");
+                                e.printStackTrace();
+                            }
+
+                            return mc;
+                        }
+                    }
+                }
+                catch (NoSuchAlgorithmException e)
+                {
+                    Log.e(TAG, "Main_Query: "+ePort+" No such Algorithm Exception Occurred");
+                }
+           }
+           return null;
     }
 
     @Override
@@ -481,7 +750,6 @@ public class SimpleDhtProvider extends ContentProvider {
         @Override
         protected Void doInBackground(ServerSocket... sockets)
         {
-            Log.d(TAG, "Server: "+ePort+" In Server Task");
             ServerSocket serverSocket = sockets[0];
             String msgfromclient, msgtoclient, ack[];
             String [] pieces;
@@ -494,101 +762,163 @@ public class SimpleDhtProvider extends ContentProvider {
                     DataOutputStream out = new DataOutputStream(server.getOutputStream());
                     msgfromclient = in.readUTF();
                     pieces = msgfromclient.split(";");
-                    out.writeUTF("ACK;"+ePort);
-                    out.flush();
-                    out.close();
-                    in.close();
+                    Log.d(TAG, "Server: "+ePort+" Received Message: "+msgfromclient);
 
                     if (pieces[0].equals(NJ)) //A new Node asks for joining
                     {
                         Log.d(TAG, "Server: "+ePort+" NJ Message Received From: "+pieces[1]);
-                        if (ePort.equals(first_node)) //First Node Processes the Join request
+                        try
                         {
-                            try
+                            isAlone = false;
+                            boolean isInserted = false;
+                            String hash = genHash(pieces[1]); //pieces[1] will be local emulator port of the sender eg. 5554
+                            Node this_node = new Node(pieces[1], hash); //instatiate a new Node Object
+                            //Node Insertion Logic
+                            int n = nodeList.size();
+                            for (int i=0; i<n; i++)
                             {
-                                isAlone = false;
-                                boolean isInserted = false;
-                                String hash = genHash(pieces[1]); //pieces[1] will be local emulator port of the sender eg. 5554
-                                Node this_node = new Node(pieces[1], hash); //instatiate a new Node Object
-                                //Node Insertion Logic
-                                int n = nodeList.size();
-                                for (int i=0; i<n; i++)
-                                {
-                                    Node node = nodeList.get(i);
-                                    int l = hash.compareTo(node.getHash());
-                                    if (l < 0) {
-                                        if (n == 1) //base case where the ring contains 5554 only
+                                Node node = nodeList.get(i);
+                                int l = hash.compareTo(node.getHash());
+                                if (l < 0) {
+                                    if (n == 1) //base case where the ring contains 5554 only
+                                    {
+                                        this_node.succ = node.port;
+                                        this_node.pred = node.port;
+                                        node.succ = this_node.port;
+                                        node.pred = this_node.port;
+                                        nodeList.add(i, this_node); //Add this_node before existing node.
+                                        isInserted = true;
+                                        break;
+                                    }
+
+                                    else { //there is more than one node in ring
+
+                                        if (i == 0) //this_node is lexicographically smallest
                                         {
-                                            this_node.succ = node.port;
-                                            this_node.pred = node.port;
-                                            node.succ = this_node.port;
-                                            node.pred = this_node.port;
-                                            nodeList.add(i, this_node); //Add this_node before existing node.
-                                            isInserted = true;
-                                            break;
+                                            this_node.pred = nodeList.get(n - 1).port; //Assign predecessor to last node
+                                            nodeList.get(n - 1).succ = this_node.port;
+                                            //nodeList.get(0).pred = this_node.node;
+                                        } else //this node is to be inserted in between the list
+                                        {
+                                            this_node.pred = nodeList.get(i - 1).port;
+                                            nodeList.get(i - 1).succ = this_node.port;
                                         }
+                                        this_node.succ = node.port; //In any case
+                                        node.pred = this_node.port;
+                                        nodeList.add(i, this_node);
+                                        isInserted = true;
+                                        break;
 
-                                        else { //there is more than one node in ring
-
-                                            if (i == 0) //this_node is lexicographically smallest
-                                            {
-                                                this_node.pred = nodeList.get(n - 1).port; //Assign predecessor to last node
-                                                nodeList.get(n - 1).succ = this_node.port;
-                                                //nodeList.get(0).pred = this_node.node;
-                                            } else //this node is to be inserted in between the list
-                                            {
-                                                this_node.pred = nodeList.get(i - 1).port;
-                                                nodeList.get(i - 1).succ = this_node.port;
-                                            }
-                                            this_node.succ = node.port; //In any case
-                                            node.pred = this_node.port;
-                                            nodeList.add(i, this_node);
-                                            isInserted = true;
-                                            break;
-
-                                        }
                                     }
                                 }
-                                if (!isInserted) // hash was found to be alphabetically higher than all nodes. Will be added at end of the nodelist
-                                {
-                                    this_node.pred = nodeList.get(n-1).port;
-                                    nodeList.get(n-1).succ = this_node.port;
-                                    this_node.succ = nodeList.get(0).port;
-                                    nodeList.get(0).pred = this_node.port;
-                                    nodeList.add(this_node); //Just append the node
-                                }
-                                sendmsgCT(UN+";"); //Update Other Nodes about their neighbours
                             }
-                            catch (NoSuchAlgorithmException e)
+
+                            if (!isInserted) // hash was found to be alphabetically higher than all nodes. Will be added at end of the nodelist
                             {
-                                Log.e(TAG, "Server: "+ePort+" No Such Algorithm Exception Occurred");
-                                e.printStackTrace();
+                                this_node.pred = nodeList.get(n-1).port;
+                                nodeList.get(n-1).succ = this_node.port;
+                                this_node.succ = nodeList.get(0).port;
+                                nodeList.get(0).pred = this_node.port;
+                                nodeList.add(this_node); //Just append the node
                             }
+                            sendmsgCT(UN+";"); //Update Other Nodes about their neighbours
+
+                            out.writeUTF("ACK;"+ePort);
+                            out.flush();
+                            out.close();
+                            in.close();
+                        }
+                        catch (NoSuchAlgorithmException e)
+                        {
+                            Log.e(TAG, "Server: "+ePort+" No Such Algorithm Exception Occurred");
+                            e.printStackTrace();
                         }
                     }
 
-                    else
+                    else if (pieces[0].equals(UN))
                     {
-                        if (pieces[0].equals(UN))
-                        {
-                            prevNode = pieces[1]; //Set Updated Neighbors
-                            nextNode = pieces[2];
-                        }
-
-                        else
-                        {
-                            if (pieces[0].equals(F))
-                            {
-                                Log.d(TAG, "Server: "+ePort+" Received Forwarded Message: "+msgfromclient+" from: "+prevNode);
-                                ContentValues contentValues = new ContentValues();
-                                contentValues.put(key_field, pieces[1]);
-                                contentValues.put(value_field, pieces[2]);
-                                getContext().getContentResolver().insert(provideruri, contentValues);
-                            }
-                        }
-
+                        prevNode = pieces[1]; //Set Updated Neighbors
+                        nextNode = pieces[2];
+                        out.writeUTF("ACK;"+ePort);
+                        out.flush();
+                        out.close();
+                        in.close();
                     }
 
+                    else if (pieces[0].equals(F))
+                    {
+                        //Log.d(TAG, "Server: "+ePort+" Received Forwarded Message: "+msgfromclient+" from: "+prevNode);
+                        ContentValues contentValues = new ContentValues();
+                        contentValues.put(key_field, pieces[1]);
+                        contentValues.put(value_field, pieces[2]);
+                        getContext().getContentResolver().insert(provideruri, contentValues);
+                        out.writeUTF("ACK;"+ePort);
+                        out.flush();
+                        out.close();
+                        in.close();
+                    }
+
+                    else if (pieces[0].equals(GA)) //Get all Keys
+                    {
+                        serverreq = true;
+                        sourceNode = pieces[1]; //source node of originator
+                        Log.d(TAG,"Server: "+ePort+" Source Node is: "+sourceNode);
+                        String result="";
+                        Cursor cursor = getContext().getContentResolver().query(provideruri, null, all_dht, null, null);
+                        //cursor.moveToFirst();
+                        while(cursor.moveToNext())
+                        {
+                            result+=cursor.getString(cursor.getColumnIndex(key_field)); //Key
+                            result+=":"+cursor.getString(cursor.getColumnIndex(value_field)); //Value
+                            result+=";";
+                        }
+                        cursor.close();
+                        out.writeUTF(result);
+                        Log.d(TAG,"Server: "+ePort+" Result is: "+result);
+                        if (!in.readUTF().equals("ACK"))
+                            Log.e(TAG, "Server: "+ePort+" Ack not Received");
+                        out.flush();
+                        out.close();
+                        in.close();
+                    }
+
+                    else if (pieces[0].equals(G))
+                    {
+                        String key = pieces[1], result = "";
+                        Cursor cursor = getContext().getContentResolver().query(provideruri, null, key, null, null);
+                        cursor.moveToFirst();
+                        result+=cursor.getString(cursor.getColumnIndex(key_field));
+                        result+=":"+cursor.getString(cursor.getColumnIndex(value_field));
+                        cursor.close();
+                        out.writeUTF(result);
+                        if (!in.readUTF().equals("ACK"))
+                            Log.e(TAG, "Server: "+ePort+" Ack not Received");
+                        out.flush();
+                        out.close();
+                        in.close();
+                    }
+
+                    else if (pieces[0].equals(D))
+                    {
+                        String key = pieces[1];
+                        getContext().getContentResolver().delete(provideruri, key, null);
+                        out.writeUTF("ACK;"+ePort);
+                        out.flush();
+                        out.close();
+                        in.close();
+                    }
+
+                    else //Delete all
+                    {
+                        serverreq=true;
+                        sourceNode = pieces[1];
+                        Log.d(TAG,"Server: "+ePort+" Source Node is: "+sourceNode);
+                        getContext().getContentResolver().delete(provideruri, all_dht, null);
+                        out.writeUTF("ACK;"+ePort);
+                        out.flush();
+                        out.close();
+                        in.close();
+                    }
                 }
                 catch (IOException e)
                 {
@@ -599,127 +929,217 @@ public class SimpleDhtProvider extends ContentProvider {
         }
     }
 
-    //Client Task starts here
     private class ClientTask extends AsyncTask<String, Void, String> //Capable of returning a string type
     {
         @Override
         protected String doInBackground(String... msgs)
         {
             String[] pieces = msgs[0].split(";");
+            Log.d(TAG, "Client: "+ePort+" Received Message: "+msgs[0]);
             String [] ack;
             if (pieces[0].equals(NJ))
             {
-                if (!ePort.equals(first_node))
+                try
                 {
-                    try
-                    {
-                        Socket client = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(first_node) * 2);
+                    Socket client = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(first_node) * 2);
+                    DataInputStream in = new DataInputStream(client.getInputStream());
+                    DataOutputStream out = new DataOutputStream(client.getOutputStream());
+                    String msgToServer = NJ + ";" + ePort;
+                    out.writeUTF(msgToServer);
+                    out.flush();
+                    ack = in.readUTF().split(";");
+                    if (!ack[0].equals("ACK"))
+                        Log.e(TAG,"Client: "+ePort+" Did not receive Ack");
+                    out.close();
+                    in.close();
+                    client.close();
+                }
+
+                catch (SocketException e)
+
+                {
+                    Log.e(TAG, "Client: "+ePort+" Socket Exception Occurred");
+                    isAlone = true;
+                    Node my_node = new Node(ePort, myPorthash);
+                    nodeList = new ArrayList<Node>();
+                    nodeList.add(my_node); //add mynode to Ring
+                }
+
+                catch (EOFException e)
+                {
+                    Log.e(TAG, "Client: "+ePort+" EOF Exception Occurred");
+                    isAlone = true;
+                    Node my_node = new Node(ePort, myPorthash);
+                    nodeList = new ArrayList<Node>();
+                    nodeList.add(my_node); //add mynode to Ring
+                }
+
+                catch (UnknownHostException e)
+                {
+                    Log.e(TAG, "Client: "+ePort+" UnknownHost Exception Occurred");
+                }
+
+                catch (IOException e)
+                {
+                    Log.e(TAG, "Client: "+ePort+" IO Exception Occurred");
+                }
+
+                catch (Exception e)
+                {
+                    Log.e(TAG, "Client: "+ePort+" Other Exception Occurred");
+                    isAlone = true;
+                    Node my_node = new Node(ePort, myPorthash);
+                    nodeList = new ArrayList<Node>();
+                    nodeList.add(my_node); //add mynode to Ring
+                }
+            }
+
+            else if (pieces[0].equals(UN)) //Update Neighbour Message
+            {
+                for (Node node: nodeList) {
+                    String msgtoServer = UN + ";" + node.getPred() + ";" + node.getSucc();
+                    try {
+                        Socket client = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(node.getPort()) * 2);
                         DataInputStream in = new DataInputStream(client.getInputStream());
                         DataOutputStream out = new DataOutputStream(client.getOutputStream());
-                        String msgToServer = NJ + ";" + ePort;
-                        out.writeUTF(msgToServer);
+                        out.writeUTF(msgtoServer);
                         out.flush();
                         ack = in.readUTF().split(";");
                         if (!ack[0].equals("ACK"))
-                            Log.e(TAG,"Client: "+ePort+" Did not receive Ack");
+                            Log.e(TAG, "Client: " + ePort + " Did not receive Ack");
                         out.close();
                         in.close();
                         client.close();
-                    }
-
-                    catch (SocketException e)
-                    {
-                        Log.e(TAG, "Client: "+ePort+" Socket Exception Occurred");
-                        isAlone = true;
-                        Node my_node = new Node(ePort, myPorthash);
-                        nodeList = new ArrayList<Node>();
-                        nodeList.add(my_node); //add mynode to Ring
-                    }
-
-                    catch (EOFException e)
-                    {
-                        Log.e(TAG, "Client: "+ePort+" EOF Exception Occurred");
-                        isAlone = true;
-                        Node my_node = new Node(ePort, myPorthash);
-                        nodeList = new ArrayList<Node>();
-                        nodeList.add(my_node); //add mynode to Ring
-                    }
-
-                    catch (UnknownHostException e)
-                    {
-                        Log.e(TAG, "Client: "+ePort+" UnknownHost Exception Occurred");
-                    }
-
-                    catch (IOException e)
-                    {
-                        Log.e(TAG, "Client: "+ePort+" IO Exception Occurred");
-                    }
-
-                    catch (Exception e)
-                    {
-                        Log.e(TAG, "Client: "+ePort+" Other Exception Occurred");
-                        isAlone = true;
-                        Node my_node = new Node(ePort, myPorthash);
-                        nodeList = new ArrayList<Node>();
-                        nodeList.add(my_node); //add mynode to Ring
+                    } catch (UnknownHostException e) {
+                        Log.e(TAG, "Client: " + ePort + " UnknownHost Exception Occurred");
+                    } catch (IOException e) {
+                        Log.e(TAG, "Client: " + ePort + " IO Exception Occurred");
                     }
                 }
             }
 
-            else {
-
-                if (pieces[0].equals(UN)) //Update Neighbour Message
+            else if (pieces[0].equals(F)) //Forward a Message to the next avd
+            {
+                try
                 {
-                    for (Node node: nodeList) {
-                        String msgtoServer = UN + ";" + node.getPred() + ";" + node.getSucc();
-                        try {
-                            Socket client = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(node.getPort()) * 2);
-                            DataInputStream in = new DataInputStream(client.getInputStream());
-                            DataOutputStream out = new DataOutputStream(client.getOutputStream());
-                            out.writeUTF(msgtoServer);
-                            out.flush();
-                            ack = in.readUTF().split(";");
-                            if (!ack[0].equals("ACK"))
-                                Log.e(TAG, "Client: " + ePort + " Did not receive Ack");
-                            out.close();
-                            in.close();
-                            client.close();
-                        } catch (UnknownHostException e) {
-                            Log.e(TAG, "Client: " + ePort + " UnknownHost Exception Occurred");
-                        } catch (IOException e) {
-                            Log.e(TAG, "Client: " + ePort + " IO Exception Occurred");
-                        }
-                    }
+                    Socket client = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(nextNode) * 2);
+                    DataInputStream in = new DataInputStream(client.getInputStream());
+                    DataOutputStream out = new DataOutputStream(client.getOutputStream());
+                    out.writeUTF(msgs[0]);
+                    out.flush();
+                    ack = in.readUTF().split(";");
+                    if (!ack[0].equals("ACK"))
+                        Log.e(TAG, "Client: " + ePort + " Did not receive Ack");
+                    out.close();
+                    in.close();
+                    client.close();
                 }
-
-                else
-                {
-                    if (pieces[0].equals(F)) //Forward a Message to the next avd
-                    {
-                        try
-                        {
-                            Log.d(TAG, "Client: "+ePort+" Forwarding Message: "+msgs[0]+" to: "+nextNode);
-                            Socket client = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(nextNode) * 2);
-                            DataInputStream in = new DataInputStream(client.getInputStream());
-                            DataOutputStream out = new DataOutputStream(client.getOutputStream());
-                            out.writeUTF(msgs[0]);
-                            out.flush();
-                            ack = in.readUTF().split(";");
-                            if (!ack[0].equals("ACK"))
-                                Log.e(TAG, "Client: " + ePort + " Did not receive Ack");
-                            out.close();
-                            in.close();
-                            client.close();
-                        }
-                        catch (UnknownHostException e) {
-                            Log.e(TAG, "Client: " + ePort + " UnknownHost Exception Occurred");
-                        } catch (IOException e) {
-                            Log.e(TAG, "Client: " + ePort + " IO Exception Occurred");
-                        }
-                    }
+                catch (UnknownHostException e) {
+                    Log.e(TAG, "Client: " + ePort + " UnknownHost Exception Occurred");
+                } catch (IOException e) {
+                    Log.e(TAG, "Client: " + ePort + " IO Exception Occurred");
                 }
             }
 
+            else if (pieces[0].equals(GA)) //Get all values corresponding to * recursive Query
+            {
+                Log.d(TAG, "Client: "+ePort+" Forwarding * Message: "+msgs[0]+" to: "+nextNode);
+                try
+                {
+                    Socket client = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(nextNode) * 2);
+                    DataInputStream in = new DataInputStream(client.getInputStream());
+                    DataOutputStream out = new DataOutputStream(client.getOutputStream());
+                    out.writeUTF(msgs[0]);
+                    out.flush();
+                    String result = in.readUTF();
+                    Log.d(TAG, "Client: "+ePort+" Received Result: "+result);
+                    out.writeUTF("ACK");
+                    out.flush();
+                    out.close();
+                    in.close();
+                    client.close();
+                    return result;
+                }
+                catch (UnknownHostException e) {
+                    Log.e(TAG, "Client: " + ePort + " UnknownHost Exception Occurred");
+                } catch (IOException e) {
+                    Log.e(TAG, "Client: " + ePort + " IO Exception Occurred");
+                }
+            }
+
+            else if (pieces[0].equals(G)) //Get all values corresponding to a particular key stored at a different node
+            {
+                try
+                {
+                    Log.d(TAG, "Client: " + ePort + " Forwarding Key: " + pieces[1] + " to: " + nextNode);
+                    Socket client = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(nextNode) * 2);
+                    DataInputStream in = new DataInputStream(client.getInputStream());
+                    DataOutputStream out = new DataOutputStream(client.getOutputStream());
+                    out.writeUTF(msgs[0]);
+                    out.flush();
+                    String result = in.readUTF();
+                    Log.d(TAG, "Client: "+ePort+" Received MC: "+result);
+                    out.writeUTF("ACK");
+                    out.flush();
+                    out.close();
+                    in.close();
+                    client.close();
+                    return result;
+                }
+                catch (UnknownHostException e) {
+                    Log.e(TAG, "Client: " + ePort + " UnknownHost Exception Occurred");
+                } catch (IOException e) {
+                    Log.e(TAG, "Client: " + ePort + " IO Exception Occurred");
+                }
+            }
+
+            else if (pieces[0].equals(D)) //Delete a key stored at another node
+            {
+                try
+                {
+                    Log.d(TAG, "Client: " + ePort + " Forwarding Key: " + pieces[1] + " to: " + nextNode);
+                    Socket client = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(nextNode) * 2);
+                    DataInputStream in = new DataInputStream(client.getInputStream());
+                    DataOutputStream out = new DataOutputStream(client.getOutputStream());
+                    out.writeUTF(msgs[0]);
+                    out.flush();
+                    ack = in.readUTF().split(";");
+                    if (!ack[0].equals("ACK"))
+                        Log.e(TAG, "Client: " + ePort + " Did not receive Ack");
+                    out.close();
+                    in.close();
+                    client.close();
+                }
+                catch (UnknownHostException e) {
+                    Log.e(TAG, "Client: " + ePort + " UnknownHost Exception Occurred");
+                } catch (IOException e) {
+                    Log.e(TAG, "Client: " + ePort + " IO Exception Occurred");
+                }
+            }
+
+            else //Delete *
+            {
+                try
+                {
+                    Log.d(TAG, "Client: " + ePort + " Forwarding Key: " + pieces[1] + " to: " + nextNode);
+                    Socket client = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(nextNode) * 2);
+                    DataInputStream in = new DataInputStream(client.getInputStream());
+                    DataOutputStream out = new DataOutputStream(client.getOutputStream());
+                    out.writeUTF(msgs[0]);
+                    out.flush();
+                    ack = in.readUTF().split(";");
+                    if (!ack[0].equals("ACK"))
+                        Log.e(TAG, "Client: " + ePort + " Did not receive Ack");
+                    out.close();
+                    in.close();
+                    client.close();
+                }
+                catch (UnknownHostException e) {
+                    Log.e(TAG, "Client: " + ePort + " UnknownHost Exception Occurred");
+                } catch (IOException e) {
+                    Log.e(TAG, "Client: " + ePort + " IO Exception Occurred");
+                }
+            }
             return null;
         }
     }
