@@ -102,6 +102,24 @@ public class SimpleDhtProvider extends ContentProvider {
         new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msg);
     }
 
+    public boolean compareKey(String prevHash, String keyHash)
+    {
+        if (myPorthash.compareTo(prevHash) > 0)
+        {
+            if (keyHash.compareTo(prevHash) > 0 && keyHash.compareTo(myPorthash) <= 0)
+                return true;
+            else
+                return false;
+        }
+        else //Special Condition between First Node and Last Node
+        {
+            if (keyHash.compareTo(prevHash) > 0 || keyHash.compareTo(myPorthash) <= 0)
+                return true;
+            else
+                return false;
+        }
+    }
+
     public String sendMsgCT(String msg)
     {
         String result=null;
@@ -202,54 +220,31 @@ public class SimpleDhtProvider extends ContentProvider {
             try {
                 String currentQueryhash = genHash(currentQuery);
                 String prevnodehash = genHash(prevNode);
-                if (myPorthash.compareTo(prevnodehash) > 0) {
-                    if (currentQueryhash.compareTo(prevnodehash) > 0 && currentQueryhash.compareTo(myPorthash) <= 0) //this key is in my scope
-                    {
-                        boolean filefound = false;
-                        for (String key : myKeys) {
-                            if (key.equals(currentQuery)) {
-                                getContext().deleteFile(key);
-                                filefound = true;
-                                break;
-                            }
-                        }
-
-                        if (filefound) {
-                            myKeys.remove(currentQuery);
-                            Log.d(TAG, "Main_Delete: " + ePort + " File with Key= " + currentQuery + " is deleted");
-                            return 1;
-                        }
-
-                        return 0;
-                    } else //send to next node
-                    {
-                        String msgtosend = D + ";" + currentQuery;
-                        sendmsgCT(msgtosend);
-                    }
-                } else //Special Condition between Node 1 and N
+                boolean result = compareKey(prevnodehash, currentQueryhash);
+                if (result)
                 {
-                    if (currentQueryhash.compareTo(prevnodehash) > 0 || currentQueryhash.compareTo(myPorthash) <= 0) {
-                        boolean filefound = false;
-                        for (String key : myKeys) {
-                            if (key.equals(currentQuery)) {
-                                getContext().deleteFile(key);
-                                filefound = true;
-                                break;
-                            }
+                    boolean filefound = false;
+                    for (String key : myKeys) {
+                        if (key.equals(currentQuery)) {
+                            getContext().deleteFile(key);
+                            filefound = true;
+                            break;
                         }
-
-                        if (filefound) {
-                            myKeys.remove(currentQuery);
-                            Log.d(TAG, "Main_Delete: " + ePort + " File with Key= " + currentQuery + " is deleted");
-                            return 1;
-                        }
-
-                        return 0;
-                    } else {
-                        String msgtosend = D + ";" + currentQuery;
-                        sendmsgCT(msgtosend);
                     }
+
+                    if (filefound) {
+                        myKeys.remove(currentQuery);
+                        Log.d(TAG, "Main_Delete: " + ePort + " File with Key= " + currentQuery + " is deleted");
+                        return 1;
+                    }
+                    return 0; //For any queried key that was not inserted
                 }
+                else //Pass it to next node
+                {
+                    String msgtosend = D + ";" + currentQuery;
+                    sendmsgCT(msgtosend);
+                }
+
             } catch (NoSuchAlgorithmException e) {
                 Log.e(TAG, "Main_Delete: " + ePort + " No Such Algorithm Exception Occurred");
                 e.printStackTrace();
@@ -308,67 +303,32 @@ public class SimpleDhtProvider extends ContentProvider {
         {
             try {
                 String prevhash = genHash(prevNode);
-                if (myPorthash.compareTo(prevhash) > 0)
+                boolean result = compareKey(prevhash, keyhash);
+                if (result)
                 {
-                    Log.d(TAG, prevhash+";"+myPorthash+";"+keyhash);
-                    if (keyhash.compareTo(prevhash) > 0 && keyhash.compareTo(myPorthash) <= 0) //this key is in my scope
+                    try
                     {
-                        try {
-                            fileOutputStream = getContext().openFileOutput(key, Context.MODE_PRIVATE);
-                            fileOutputStream.write(value.getBytes());
-                            myKeys.add(key);
-                            //Log.d(TAG, "FileList: "+myKeys);
-                        }
-                        catch (NullPointerException e)
-                        {
-                            Log.e(TAG, "Main_Insert: " +ePort+ " Nullpointer Exception Occurred");
-                            e.printStackTrace();
-                        }
-
-                        catch (IOException e)
-                        {
-                            Log.e(TAG, "Main_Insert: " +ePort+ " IO Exception Occurred");
-                            e.printStackTrace();
-                        }
+                        fileOutputStream = getContext().openFileOutput(key, Context.MODE_PRIVATE);
+                        fileOutputStream.write(value.getBytes());
+                        myKeys.add(key);
+                        //Log.d(TAG, "FileList: "+myKeys);
                     }
-
-                    else //forward to next Node
+                    catch (NullPointerException e)
                     {
-                        String msgtoclient = F+";"+key+";"+value;
-                        sendmsgCT(msgtoclient);
+                        Log.e(TAG, "Main_Insert: " +ePort+ " Nullpointer Exception Occurred");
+                        e.printStackTrace();
+                    }
+                    catch (IOException e)
+                    {
+                        Log.e(TAG, "Main_Insert: " +ePort+ " IO Exception Occurred");
+                        e.printStackTrace();
                     }
                 }
 
                 else
                 {
-                    if (keyhash.compareTo(prevhash) > 0 || keyhash.compareTo(myPorthash) <= 0) //Condition between last node and first node. Even then this key is in my scope
-                    {
-                        try
-                        {
-                            fileOutputStream = getContext().openFileOutput(key, Context.MODE_PRIVATE);
-                            fileOutputStream.write(value.getBytes());
-                            myKeys.add(key);
-                            Log.d(TAG, "FileList: "+myKeys);
-                        }
-
-                        catch (NullPointerException e)
-                        {
-                            Log.e(TAG, "Main_Insert: " +ePort+ " Nullpointer Exception Occurred");
-                            e.printStackTrace();
-                        }
-
-                        catch (IOException e)
-                        {
-                            Log.e(TAG, "Main_Insert: " +ePort+ " IO Exception Occurred");
-                            e.printStackTrace();
-                        }
-                    }
-
-                    else //forward to next node. This part may be redundant
-                    {
-                        String msgtoclient = F+";"+key+";"+value;
-                        sendmsgCT(msgtoclient);
-                    }
+                    String msgtoclient = F+";"+key+";"+value;
+                    sendmsgCT(msgtoclient);
                 }
             }
 
@@ -510,221 +470,161 @@ public class SimpleDhtProvider extends ContentProvider {
             }
         }
 
-           else if (currentQuery.equals(my_dht)) //Selection of @ in self node
+       else if (currentQuery.equals(my_dht)) //Selection of @ in self node
+       {
+           Log.d(TAG, "Main_Query: "+ePort+" Query is: "+currentQuery);
+           try
            {
-               Log.d(TAG, "Main_Query: "+ePort+" Query is: "+currentQuery);
-               try
+               for (String key: myKeys)
                {
-                   for (String key: myKeys)
+                   fileInputStream = getContext().openFileInput(key);
+                   if (fileInputStream!=null)
                    {
-                       fileInputStream = getContext().openFileInput(key);
-                       if (fileInputStream!=null)
-                       {
-                           BufferedReader br = new BufferedReader(new InputStreamReader(fileInputStream));
-                           message = br.readLine();
-                           String row[] = {key, message};
-                           mc.addRow(row);
-                           br.close();
-                           fileInputStream.close();
-                       }
+                       BufferedReader br = new BufferedReader(new InputStreamReader(fileInputStream));
+                       message = br.readLine();
+                       String row[] = {key, message};
+                       mc.addRow(row);
+                       br.close();
+                       fileInputStream.close();
                    }
                }
-
-               catch (FileNotFoundException e)
-               {
-                   Log.e(TAG, "Main_Query: "+ePort+" Unable to Open file");
-               }
-
-               catch (IOException e)
-               {
-                   Log.e(TAG, "Main_Query: "+ePort+" IO Exception Occurred");
-               }
-
-               return mc;
            }
 
-           else if (currentQuery.equals(all_dht)) //return all key value pairs stored in entire DHT from any Node
+           catch (FileNotFoundException e)
            {
-               Log.d(TAG, "Main_Query: "+ePort+" Query is: "+all_dht);
-               try
-               {
-                   for (String key: myKeys) //In my Node
-                   {
-                       fileInputStream = getContext().openFileInput(key);
-                       if (fileInputStream!=null)
-                       {
-                           BufferedReader br = new BufferedReader(new InputStreamReader(fileInputStream));
-                           message = br.readLine();
-                           String row[] = {key, message};
-                           mc.addRow(row);
-                           br.close();
-                           fileInputStream.close();
-                       }
-                   }
-               }
-               catch (FileNotFoundException e)
-               {
-                   Log.e(TAG, "Main_Query: "+ePort+" Unable to Open file");
-               }
-               catch (IOException e)
-               {
-                   Log.e(TAG, "Main_Query: "+ePort+" IO Exception Occurred");
-               }
-
-               Log.d(TAG, "Main_Query: "+ePort+" Self Keys added in Matrix Cursor");
-               if (!serverreq || !nextNode.equals(sourceNode))
-               {
-                   String msgtoSend, result;
-                   if(serverreq)//Will be false for Originating Server
-                   {
-                       msgtoSend = GA+";"+sourceNode;
-                       result = sendMsgCT(msgtoSend);
-                   }
-                   else
-                   {
-                       msgtoSend = GA+";"+ePort;
-                       result = sendMsgCT(msgtoSend);
-                   }
-
-                   if (!result.isEmpty())
-                   {
-                       String keyvalues[] = result.split(";");
-                       for (String keyvalue: keyvalues)
-                       {
-                           String[] kv = keyvalue.split(":");
-                           String[] row = {kv[0], kv[1]};
-                           mc.addRow(row);
-                       }
-                   }
-               }
-               serverreq = false;
-               return mc;
+               Log.e(TAG, "Main_Query: "+ePort+" Unable to Open file");
            }
 
-           else //Any Particular Query
+           catch (IOException e)
            {
-               Log.d(TAG, "Main_Query: "+ePort+" Query is: "+currentQuery);
-                try
+               Log.e(TAG, "Main_Query: "+ePort+" IO Exception Occurred");
+           }
+
+           return mc;
+       }
+
+       else if (currentQuery.equals(all_dht)) //return all key value pairs stored in entire DHT from any Node
+       {
+           Log.d(TAG, "Main_Query: "+ePort+" Query is: "+all_dht);
+           try
+           {
+               for (String key: myKeys) //In my Node
+               {
+                   fileInputStream = getContext().openFileInput(key);
+                   if (fileInputStream!=null)
+                   {
+                       BufferedReader br = new BufferedReader(new InputStreamReader(fileInputStream));
+                       message = br.readLine();
+                       String row[] = {key, message};
+                       mc.addRow(row);
+                       br.close();
+                       fileInputStream.close();
+                   }
+               }
+           }
+           catch (FileNotFoundException e)
+           {
+               Log.e(TAG, "Main_Query: "+ePort+" Unable to Open file");
+           }
+           catch (IOException e)
+           {
+               Log.e(TAG, "Main_Query: "+ePort+" IO Exception Occurred");
+           }
+
+           Log.d(TAG, "Main_Query: "+ePort+" Self Keys added in Matrix Cursor");
+           if (!serverreq || !nextNode.equals(sourceNode))
+           {
+               String msgtoSend, result;
+               if(serverreq)//Will be false for Originating Server
+               {
+                   msgtoSend = GA+";"+sourceNode;
+                   result = sendMsgCT(msgtoSend);
+               }
+               else
+               {
+                   msgtoSend = GA+";"+ePort;
+                   result = sendMsgCT(msgtoSend);
+               }
+
+               if (!result.isEmpty())
+               {
+                   String keyvalues[] = result.split(";");
+                   for (String keyvalue: keyvalues)
+                   {
+                       String[] kv = keyvalue.split(":");
+                       String[] row = {kv[0], kv[1]};
+                       mc.addRow(row);
+                   }
+               }
+           }
+           serverreq = false;
+           return mc;
+       }
+
+       else //Any Particular Query
+       {
+           Log.d(TAG, "Main_Query: "+ePort+" Query is: "+currentQuery);
+            try
+            {
+                String currentQueryHash = genHash(currentQuery);
+                String prevNodeHash = genHash(prevNode);
+                boolean key_result = compareKey(prevNodeHash, currentQueryHash);
+                if (key_result)
                 {
-                    String currentQueryHash = genHash(currentQuery);
-                    String prevNodeHash = genHash(prevNode);
-                    if (myPorthash.compareTo(prevNodeHash) > 0)
+                    Log.d(TAG, "Main_Query: "+ePort+" This query Item lies in my scope");
+                    try
                     {
-                        Log.d(TAG, prevNodeHash+";"+currentQueryHash+";"+myPorthash);
-                        if (currentQueryHash.compareTo(prevNodeHash) > 0 && currentQueryHash.compareTo(myPorthash) <= 0)
+                        fileInputStream = getContext().openFileInput(currentQuery);
+                        Log.d(TAG, "Main_Query: "+ePort+" Key: "+currentQuery+" located here");
+                        if (fileInputStream!=null)
                         {
-                            Log.d(TAG, "Main_Query: "+ePort+" This query Item lies in my scope");
-                            try
-                            {
-                                fileInputStream = getContext().openFileInput(currentQuery);
-                                Log.d(TAG, "Main_Query: "+ePort+" Key: "+currentQuery+" located here");
-                                if (fileInputStream!=null)
-                                {
-                                    BufferedReader br = new BufferedReader(new InputStreamReader(fileInputStream));
-                                    message = br.readLine();
-                                    String[] row = {currentQuery, message};
-                                    mc.addRow(row);
-                                    br.close();
-                                    fileInputStream.close();
-                                }
-                            }
-                            catch (FileNotFoundException e)
-                            {
-                                Log.e(TAG, "Main_Query: "+ePort+" FilenotFound Exception Occurred");
-                            }
-                            catch (IOException e)
-                            {
-                                Log.e(TAG, "Main_Query: "+ePort+" IOException Occurred");
-                            }
-                            return mc;
-                        }
-
-                        else //Recursive Part
-                        {
-                            Log.d(TAG, "Main_Query: "+ePort+" Passing: "+currentQuery+" to Next Node: "+nextNode);
-                            try
-                            {
-                                String msgtosend = G+";"+currentQuery;
-                                String result = sendMsgCT(msgtosend); // A New Thread gets created
-                                if (!result.isEmpty())
-                                {
-                                    String [] keyvalue = result.split(":");
-                                    String [] rows = {keyvalue[0], keyvalue[1]};
-                                    mc.addRow(rows);
-                                }
-                            }
-                            catch (Exception e)
-                            {
-                                Log.e(TAG, "Main_Query: "+ePort+" Exception Occurred");
-                                e.printStackTrace();
-                            }
-                            return mc;
+                            BufferedReader br = new BufferedReader(new InputStreamReader(fileInputStream));
+                            message = br.readLine();
+                            String[] row = {currentQuery, message};
+                            mc.addRow(row);
+                            br.close();
+                            fileInputStream.close();
                         }
                     }
-
-                    else //Exceptional Condition
+                    catch (FileNotFoundException e)
                     {
-                        if (currentQueryHash.compareTo(prevNodeHash) > 0 || currentQueryHash.compareTo(myPorthash) <= 0)
+                        Log.e(TAG, "Main_Query: "+ePort+" FilenotFound Exception Occurred");
+                    }
+                    catch (IOException e)
+                    {
+                        Log.e(TAG, "Main_Query: "+ePort+" IOException Occurred");
+                    }
+                    return mc;
+                }
+
+                else
+                {
+                    Log.d(TAG, "Main_Query: "+ePort+" Passing: "+currentQuery+" to Next Node: "+nextNode);
+                    try
+                    {
+                        String msgtosend = G+";"+currentQuery;
+                        String result = sendMsgCT(msgtosend); // A New Thread gets created
+                        if (!result.isEmpty())
                         {
-                            try
-                            {
-                                Log.d(TAG, "Main_Query: "+ePort+" Between First and Last Node");
-                                fileInputStream = getContext().openFileInput(currentQuery);
-                                Log.d(TAG, "Main_Query: "+ePort+" Key: "+currentQuery+" located here");
-                                if (fileInputStream!=null)
-                                {
-                                    BufferedReader br = new BufferedReader(new InputStreamReader(fileInputStream));
-                                    message = br.readLine();
-                                    String [] row = {currentQuery, message};
-                                    mc.addRow(row);
-                                    br.close();
-                                    fileInputStream.close();
-                                }
-                            }
-                            catch (FileNotFoundException e)
-                            {
-                                Log.e(TAG, "Main_Query: "+ePort+" FileNotFound Exception Occurred");
-                            }
-
-                            catch (IOException e)
-                            {
-                                Log.e(TAG, "Main_Query: "+ePort+" IOException Occurred");
-                            }
-
-                            return mc;
-                        }
-
-                        else // Recursive Part
-                        {
-                            Log.d(TAG, "Main_Query: "+ePort+" Passing: "+currentQuery+" to Next Node: "+nextNode);
-                            String msgtoSend, result;
-                            try
-                            {
-                                msgtoSend = G+";"+currentQuery;
-                                result = sendMsgCT(msgtoSend);
-                                if(!result.isEmpty())
-                                {
-                                    String [] keyvalue = result.split(":");
-                                    String[] row = {keyvalue[0], keyvalue[1]};
-                                    mc.addRow(row);
-                                }
-                            }
-                            catch (Exception e)
-                            {
-                                Log.e(TAG, "Main_Query: "+ePort+" Exception Occurred");
-                                e.printStackTrace();
-                            }
-
-                            return mc;
+                            String [] keyvalue = result.split(":");
+                            String [] rows = {keyvalue[0], keyvalue[1]};
+                            mc.addRow(rows);
                         }
                     }
+                    catch (Exception e)
+                    {
+                        Log.e(TAG, "Main_Query: "+ePort+" Exception Occurred");
+                        e.printStackTrace();
+                    }
+                    return mc;
                 }
-                catch (NoSuchAlgorithmException e)
-                {
-                    Log.e(TAG, "Main_Query: "+ePort+" No such Algorithm Exception Occurred");
-                }
-           }
-           return null;
+            }
+            catch (NoSuchAlgorithmException e)
+            {
+                Log.e(TAG, "Main_Query: "+ePort+" No such Algorithm Exception Occurred");
+            }
+       }
+       return null;
     }
 
     @Override
