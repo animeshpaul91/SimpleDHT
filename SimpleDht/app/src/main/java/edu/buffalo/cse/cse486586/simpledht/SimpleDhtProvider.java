@@ -956,7 +956,6 @@ public class SimpleDhtProvider extends ContentProvider {
                 }
 
                 catch (SocketException e)
-
                 {
                     Log.e(TAG, "Client: "+ePort+" Socket Exception Occurred");
                     isAlone = true;
