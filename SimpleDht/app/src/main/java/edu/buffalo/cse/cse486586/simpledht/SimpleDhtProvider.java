@@ -27,6 +27,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.util.*;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 
 
@@ -39,7 +40,7 @@ public class SimpleDhtProvider extends ContentProvider {
     private static final int SERVER_PORT = 10000;
     private static final String first_node = "5554";
     boolean isAlone;
-    boolean serverreq;
+    boolean flag;
     private static final String key_field = "key";
     private static final String  value_field = "value";
     private static final String my_dht = "@";
@@ -136,6 +137,11 @@ public class SimpleDhtProvider extends ContentProvider {
         {
             Log.e(TAG, "Main: "+ePort+" Execution Exception Occurred");
         }
+
+        catch (CancellationException e)
+        {
+            Log.e(TAG, "Main: "+ePort+" Cancellation Exception Occurred");
+        }
         return result;
     }
 
@@ -143,13 +149,14 @@ public class SimpleDhtProvider extends ContentProvider {
     public int delete(Uri uri, String selection, String[] selectionArgs) {
         // TODO Auto-generated method stub
         String currentQuery = selection;
+        Context con = getContext();
         if (isAlone) //Phase 1 of grader
         {
             if (currentQuery.equals(my_dht) || currentQuery.equals(all_dht)) //* or @ is same for a single node
             {
                 for (String key: myKeys)
                 {
-                    getContext().deleteFile(key); //Deletes the file from avd
+                    con.deleteFile(key); //Deletes the file from avd
                 }
                 myKeys.clear();
                 Log.d(TAG, "Main_Delete: "+ePort+" All Files from Avd are Deleted");
@@ -163,7 +170,7 @@ public class SimpleDhtProvider extends ContentProvider {
                 {
                     if (key.equals(currentQuery))
                     {
-                        getContext().deleteFile(key);
+                        con.deleteFile(key);
                         fileFound = true;
                         break;
                     }
@@ -183,7 +190,7 @@ public class SimpleDhtProvider extends ContentProvider {
         {
             for (String key: myKeys)
             {
-                getContext().deleteFile(key);
+                con.deleteFile(key);
             }
             myKeys.clear();
             return 1;
@@ -193,14 +200,14 @@ public class SimpleDhtProvider extends ContentProvider {
         {
             for (String key: myKeys)
             {
-                getContext().deleteFile(key);
+                con.deleteFile(key);
             }
             myKeys.clear();
 
-            if (!serverreq || !nextNode.equals(sourceNode))
+            if (!flag || !nextNode.equals(sourceNode))
             {
                 String msgtosend;
-                if (serverreq)
+                if (flag)
                 {
                     msgtosend = DA+";"+sourceNode;
                     sendmsgCT(msgtosend);
@@ -211,7 +218,7 @@ public class SimpleDhtProvider extends ContentProvider {
                     sendmsgCT(msgtosend);
                 }
             }
-            serverreq=false;
+            flag=false;
             return 1;
         }
 
@@ -226,7 +233,7 @@ public class SimpleDhtProvider extends ContentProvider {
                     boolean filefound = false;
                     for (String key : myKeys) {
                         if (key.equals(currentQuery)) {
-                            getContext().deleteFile(key);
+                            con.deleteFile(key);
                             filefound = true;
                             break;
                         }
@@ -266,6 +273,7 @@ public class SimpleDhtProvider extends ContentProvider {
         key = values.getAsString(key_field);
         value = values.getAsString(value_field);
         FileOutputStream fileOutputStream;
+        Context con = getContext();
 
         try {
             keyhash = genHash(key);
@@ -279,7 +287,7 @@ public class SimpleDhtProvider extends ContentProvider {
         {
             try
             {
-                fileOutputStream = getContext().openFileOutput(key, Context.MODE_PRIVATE);
+                fileOutputStream = con.openFileOutput(key, Context.MODE_PRIVATE);
                 fileOutputStream.write(value.getBytes());
                 Log.d(TAG, "Main_Insert: "+ePort+" Insertion Successful "+values.toString());
                 myKeys.add(key); //Mapping this key to this Node
@@ -308,7 +316,7 @@ public class SimpleDhtProvider extends ContentProvider {
                 {
                     try
                     {
-                        fileOutputStream = getContext().openFileOutput(key, Context.MODE_PRIVATE);
+                        fileOutputStream = con.openFileOutput(key, Context.MODE_PRIVATE);
                         fileOutputStream.write(value.getBytes());
                         myKeys.add(key);
                         //Log.d(TAG, "FileList: "+myKeys);
@@ -352,7 +360,7 @@ public class SimpleDhtProvider extends ContentProvider {
 
         myKeys = new ArrayList<String>();
         isAlone = false;
-        serverreq = false; //Flags are false for other Nodes
+        flag = false; //Flags are false for other Nodes
 
         try
         {
@@ -366,10 +374,10 @@ public class SimpleDhtProvider extends ContentProvider {
 
         if (ePort.equals(first_node)) //First Node gets added to chord
         {
-            isAlone = true; //Flag is true for my Node
             Node initial_node = new Node(ePort, myPorthash);
             nodeList = new ArrayList<Node>(); //Maintain a state at Node 5554
             nodeList.add(initial_node); //Node 5554 first joins the chord
+            isAlone = true; //Flag is true for my Node
         }
 
         try{
@@ -399,7 +407,8 @@ public class SimpleDhtProvider extends ContentProvider {
         FileInputStream fileInputStream;
         String[] columns = {key_field, value_field};
         MatrixCursor mc = new MatrixCursor(columns);
-        String message = new String();
+        String message;
+        Context con = getContext();
 
         if (isAlone) //Phase 1 of grader
         {
@@ -408,7 +417,7 @@ public class SimpleDhtProvider extends ContentProvider {
                 try {
                     for (String key : myKeys) //for all keys in my avd
                     {
-                        fileInputStream = getContext().openFileInput(key);
+                        fileInputStream = con.openFileInput(key);
                         if (fileInputStream !=null)
                         {
                             BufferedReader br = new BufferedReader(new InputStreamReader(fileInputStream));
@@ -441,7 +450,7 @@ public class SimpleDhtProvider extends ContentProvider {
             {
                 try
                 {
-                    fileInputStream = getContext().openFileInput(currentQuery);
+                    fileInputStream = con.openFileInput(currentQuery);
                     if (fileInputStream != null)
                     {
                         BufferedReader br = new BufferedReader(new InputStreamReader(fileInputStream));
@@ -477,7 +486,7 @@ public class SimpleDhtProvider extends ContentProvider {
            {
                for (String key: myKeys)
                {
-                   fileInputStream = getContext().openFileInput(key);
+                   fileInputStream = con.openFileInput(key);
                    if (fileInputStream!=null)
                    {
                        BufferedReader br = new BufferedReader(new InputStreamReader(fileInputStream));
@@ -510,7 +519,7 @@ public class SimpleDhtProvider extends ContentProvider {
            {
                for (String key: myKeys) //In my Node
                {
-                   fileInputStream = getContext().openFileInput(key);
+                   fileInputStream = con.openFileInput(key);
                    if (fileInputStream!=null)
                    {
                        BufferedReader br = new BufferedReader(new InputStreamReader(fileInputStream));
@@ -532,10 +541,10 @@ public class SimpleDhtProvider extends ContentProvider {
            }
 
            Log.d(TAG, "Main_Query: "+ePort+" Self Keys added in Matrix Cursor");
-           if (!serverreq || !nextNode.equals(sourceNode))
+           if (!flag || !nextNode.equals(sourceNode))
            {
                String msgtoSend, result;
-               if(serverreq)//Will be false for Originating Server
+               if(flag)//Will be false for Originating Server
                {
                    msgtoSend = GA+";"+sourceNode;
                    result = sendMsgCT(msgtoSend);
@@ -557,7 +566,7 @@ public class SimpleDhtProvider extends ContentProvider {
                    }
                }
            }
-           serverreq = false;
+           flag = false;
            return mc;
        }
 
@@ -574,7 +583,7 @@ public class SimpleDhtProvider extends ContentProvider {
                     Log.d(TAG, "Main_Query: "+ePort+" This query Item lies in my scope");
                     try
                     {
-                        fileInputStream = getContext().openFileInput(currentQuery);
+                        fileInputStream = con.openFileInput(currentQuery);
                         Log.d(TAG, "Main_Query: "+ePort+" Key: "+currentQuery+" located here");
                         if (fileInputStream!=null)
                         {
@@ -653,6 +662,7 @@ public class SimpleDhtProvider extends ContentProvider {
             ServerSocket serverSocket = sockets[0];
             String msgfromclient, msgtoclient, ack[];
             String [] pieces;
+            Context con = getContext();
 
             while (true)
             {
@@ -751,7 +761,7 @@ public class SimpleDhtProvider extends ContentProvider {
                         ContentValues contentValues = new ContentValues();
                         contentValues.put(key_field, pieces[1]);
                         contentValues.put(value_field, pieces[2]);
-                        getContext().getContentResolver().insert(provideruri, contentValues);
+                        con.getContentResolver().insert(provideruri, contentValues);
                         out.writeUTF("ACK;"+ePort);
                         out.flush();
                         out.close();
@@ -760,12 +770,11 @@ public class SimpleDhtProvider extends ContentProvider {
 
                     else if (pieces[0].equals(GA)) //Get all Keys
                     {
-                        serverreq = true;
+                        flag = true;
                         sourceNode = pieces[1]; //source node of originator
                         Log.d(TAG,"Server: "+ePort+" Source Node is: "+sourceNode);
                         String result="";
-                        Cursor cursor = getContext().getContentResolver().query(provideruri, null, all_dht, null, null);
-                        //cursor.moveToFirst();
+                        Cursor cursor = con.getContentResolver().query(provideruri, null, all_dht, null, null);
                         while(cursor.moveToNext())
                         {
                             result+=cursor.getString(cursor.getColumnIndex(key_field)); //Key
@@ -785,7 +794,7 @@ public class SimpleDhtProvider extends ContentProvider {
                     else if (pieces[0].equals(G))
                     {
                         String key = pieces[1], result = "";
-                        Cursor cursor = getContext().getContentResolver().query(provideruri, null, key, null, null);
+                        Cursor cursor = con.getContentResolver().query(provideruri, null, key, null, null);
                         cursor.moveToFirst();
                         result+=cursor.getString(cursor.getColumnIndex(key_field));
                         result+=":"+cursor.getString(cursor.getColumnIndex(value_field));
@@ -801,7 +810,7 @@ public class SimpleDhtProvider extends ContentProvider {
                     else if (pieces[0].equals(D))
                     {
                         String key = pieces[1];
-                        getContext().getContentResolver().delete(provideruri, key, null);
+                        con.getContentResolver().delete(provideruri, key, null);
                         out.writeUTF("ACK;"+ePort);
                         out.flush();
                         out.close();
@@ -810,10 +819,10 @@ public class SimpleDhtProvider extends ContentProvider {
 
                     else //Delete all
                     {
-                        serverreq=true;
+                        flag=true;
                         sourceNode = pieces[1];
                         Log.d(TAG,"Server: "+ePort+" Source Node is: "+sourceNode);
-                        getContext().getContentResolver().delete(provideruri, all_dht, null);
+                        con.getContentResolver().delete(provideruri, all_dht, null);
                         out.writeUTF("ACK;"+ePort);
                         out.flush();
                         out.close();
