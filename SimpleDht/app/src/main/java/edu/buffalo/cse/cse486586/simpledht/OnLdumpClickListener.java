@@ -40,7 +40,6 @@ public class OnLdumpClickListener implements OnClickListener {
                     String key = cursor.getString(cursor.getColumnIndex("key"));
                     String value = cursor.getString(cursor.getColumnIndex("value"));
                     publishProgress(key + ":" + value + "\n");
-                    cursor.moveToNext();
                 }
             }
             cursor.close();
