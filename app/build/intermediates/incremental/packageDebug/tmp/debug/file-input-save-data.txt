@@ -1,0 +1,7 @@
+#Internal package file, do not edit.
+#Sat May 18 03:30:23 EDT 2019
+0.baseType=DIRECTORY
+0.base=/home/animesh/AndroidStudioProjects/SimpleDht/app/build/intermediates/dex/debug/mergeDexDebug/out
+0.path=classes.dex
+0.set=DEX
+count=1
