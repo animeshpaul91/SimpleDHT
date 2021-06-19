@@ -1,7 +1,7 @@
 # Simple Distributed Hash Table
 ## A simplified implementation of a Distributed Hash Table based on the Chord Architecture
 
-This project aimed at the implementation of a simplified Distributed Hash Table using Consistent Hashing based on the chord architecture. In an android environment, there are five emulators which were used to store data. The following functionalities were implemented in the project: 
+This project is aimed at the implementation of a simplified Distributed Hash Table using Consistent Hashing based on the chord architecture. In an android environment, there are five emulators which were used to store data. The following functionalities were implemented in the project: 
 1. ID space Partitioning/Re-Partitioning
 2. Ring-based routing
 3. Node joins
